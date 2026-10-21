@@ -1,0 +1,40 @@
+# 生产覆盖：加 nginx 反代，关闭所有内部服务的端口暴露（只 nginx 对外）
+# 用法：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# 前置：把 SSL 证书放到 ./certs/fullchain.pem 和 ./certs/privkey.pem
+
+services:
+  # 内部服务：去掉端口映射，只在 docker 网络内可达
+  postgres:
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+
+  chroma:
+    ports: !reset []
+
+  mcp:
+    ports: !reset []
+
+  backend:
+    ports: !reset []
+    environment:
+      # 生产 CORS 收紧：只允许自己的域名
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://${DOMAIN:-localhost}}
+
+  frontend:
+    ports: !reset []
+
+  # 新增：nginx 反向代理（唯一对外入口）
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped

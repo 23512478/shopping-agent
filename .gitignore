@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.env
+node_modules/
+dist/
+.venv/
+certs/
+
+# 京粉商品池运行时缓存
+mcp_server/data/jd_pool_cache.json
+
+# 测试与 IDE
+.pytest_cache/
+.coverage
+.idea/
+
+# 个人材料，不进仓库
+*.docx
+*.pdf
+面试问答-*.md
+技术交流准备-*.md
+CSDN博客-*.md

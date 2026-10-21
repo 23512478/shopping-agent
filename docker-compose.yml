@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent}
+      POSTGRES_DB: ${POSTGRES_DB:-shopping}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chromadata:/chroma/chroma
+
+  mcp:
+    build: ./mcp_server
+    environment:
+      # 京东联盟导购媒体凭证，不配则 mcp 用 mock 数据源（data/products.json）
+      JD_APP_KEY: ${JD_APP_KEY:-}
+      JD_SECRET_KEY: ${JD_SECRET_KEY:-}
+    ports:
+      - "9000:9000"
+    volumes:
+      # 京粉频道池探测结果（/srv/data/jd_pool_cache.json）落盘持久化。
+      # 探测一次要 3.5~5 分钟（1~60 频道 × 每频道 10 页），挂上卷之后容器重建/重启
+      # 直接吃 6h TTL 内的缓存，不用每次重跑（第二十六轮遗留②）。
+      # 注意：命名卷只在首次创建时把镜像里的 /srv/data（含 mock 的 products.json）拷进去，
+      # 之后再改镜像里的 products.json 不会自动同步到已存在的卷——改 mock 数据要先删卷。
+      - mcpcache:/srv/data
+
+  backend:
+    build: ./backend
+    environment:
+      # 自动拼接，避免和 POSTGRES_* 不一致；也可在 .env 直接设 DATABASE_URL 覆盖
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent}@postgres:5432/${POSTGRES_DB:-shopping}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CHROMA_HOST: ${CHROMA_HOST:-chroma}
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
+      MCP_URL: ${MCP_URL:-http://mcp:9000}
+      # 步骤 22：API_TOKEN 不配=开发模式（不校验）；生产设一个长随机串
+      API_TOKEN: ${API_TOKEN:-}
+      # ⑦ 匿名身份 token 的签名密钥；生产必须设，否则用开发默认值可被伪造
+      USER_TOKEN_SECRET: ${USER_TOKEN_SECRET:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-60}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+      - chroma
+      - mcp
+    volumes:
+      # ChromaDB 嵌入模型缓存（all-MiniLM-L6-v2），避免容器重建后重新从 S3 下载
+      - chromacache:/root/.cache/chroma
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  chromadata:
+  chromacache:
+  mcpcache:
